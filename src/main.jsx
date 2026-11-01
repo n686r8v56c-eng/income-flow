@@ -12,7 +12,25 @@ useEffect(()=>{if(!supabase){setReady(true);return}supabase.auth.getSession().th
 useEffect(()=>{loaded.current=false;if(!user){setData(initial());return}let cancelled=false;async function load(){setNotice('클라우드 불러오는 중…');const{data:row,error}=await supabase.from('income_flow_data').select('payload').eq('user_id',user.id).maybeSingle();if(cancelled)return;if(error){setNotice('불러오기 실패: '+error.message);return}const next=row?.payload?.strategies?row.payload:initial();setData(next);rev.current++;loaded.current=true;setNotice('동기화 연결됨 ✓')}load();return()=>{cancelled=true}},[user?.id]);
 useEffect(()=>{if(!user||!loaded.current)return;const current=++rev.current;setNotice('저장 대기 중…');const timer=setTimeout(async()=>{const{error}=await supabase.from('income_flow_data').upsert({user_id:user.id,payload:data,updated_at:new Date().toISOString()},{onConflict:'user_id'});if(current===rev.current)setNotice(error?'저장 실패: '+error.message:'클라우드 저장됨 ✓')},800);return()=>clearTimeout(timer)},[data,user?.id]);
 const change=fn=>setData(d=>fn(structuredClone(d))),strategy=id=>data.strategies.find(s=>s.id===id),salesTotal=data.sales.reduce((a,s)=>a+n(s.amount),0),paidTotal=data.receipts.reduce((a,r)=>a+n(r.amount),0),monthly=data.sales.filter(s=>s.date.startsWith(month())).reduce((a,s)=>a+n(s.amount),0),milestones=data.strategies.flatMap(s=>s.steps||[]),done=milestones.filter(s=>s.done).length;
-async function auth(e){e.preventDefault();if(!supabase)return;setBusy(true);const fn=authMode==='로그인'?supabase.auth.signInWithPassword:supabase.auth.signUp;const{data:result,error}=await fn({email,password:pass});setNotice(error?error.message:result?.session?'로그인 성공':'이메일 인증 후 로그인해 주세요');setBusy(false)}
+async function auth(e){
+ e.preventDefault();
+ if(!supabase){setNotice('Supabase 연결 설정이 없습니다.');return;}
+ if(busy)return;
+ setBusy(true);setNotice('Supabase에 연결 중…');
+ const controller=new AbortController();
+ const timeout=setTimeout(()=>controller.abort(),15000);
+ try{
+  const credentials={email:email.trim(),password:pass,options:{captchaToken:undefined}};
+  const request=authMode==='로그인'
+   ? supabase.auth.signInWithPassword({email:credentials.email,password:credentials.password})
+   : supabase.auth.signUp({email:credentials.email,password:credentials.password});
+  const deadline=new Promise((_,reject)=>{controller.signal.addEventListener('abort',()=>reject(new Error('15초 동안 응답이 없습니다. Cloudflare 환경변수와 Supabase 연결을 확인해 주세요.')),{once:true});});
+  const {data:result,error}=await Promise.race([request,deadline]);
+  if(error)throw error;
+  setNotice(result?.session?'로그인 성공':authMode==='회원가입'?'회원가입 요청 완료. 이메일 인증 메시지를 확인해 주세요.':'로그인 결과를 확인해 주세요.');
+ }catch(err){setNotice('인증 오류: '+(err?.message||'알 수 없는 오류'));}
+ finally{clearTimeout(timeout);setBusy(false);}
+}
 function addStrategy(source){const x=source||form;const type=types.find(t=>t[0]===x.type)||types[0];change(d=>{d.strategies.push({id:id(),name:x.name||type[1],type:x.type||'digital',price:n(x.price),qty:n(x.qty),target:n(x.target)||n(x.price)*n(x.qty),steps:[],created:iso()});return d});setModal('');setForm({})}
 function open(kind,extra={}){setForm(extra);setModal(kind)}
 function saveSale(){if(!form.strategyId||!n(form.amount))return alert('전략과 금액을 입력해 주세요');change(d=>{d.sales.push({id:id(),strategyId:form.strategyId,date:form.date||iso(),amount:n(form.amount),qty:n(form.qty),note:form.note||''});return d});setModal('')}
