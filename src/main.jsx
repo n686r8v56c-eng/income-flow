@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import {createClient} from '@supabase/supabase-js';
 import {Home,Target,CalendarDays,Wallet,ChartNoAxesCombined,History,Plus,ChevronLeft,ChevronRight,ChevronDown,Check,Trash2,Pencil,LogOut,X,Copy,ArrowUpRight,SlidersHorizontal,RotateCcw} from 'lucide-react';
 import './style.css';
+const sameSnapshot=(a,b)=>{const order=x=>Array.isArray(x)?x.map(order):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,order(x[k])])):x;return JSON.stringify(order(a))===JSON.stringify(order(b))};
 const client=import.meta.env.VITE_SUPABASE_URL&&import.meta.env.VITE_SUPABASE_ANON_KEY?createClient(import.meta.env.VITE_SUPABASE_URL,import.meta.env.VITE_SUPABASE_ANON_KEY):null;
 const TYPES=[['digital','디지털 콘텐츠·앱','판매 단가','판매 건수','건'],['tutor','튜터링·시간제','시간당 단가','수업 시간','시간'],['freelance','프리랜서·프로젝트','계약 단가','계약 건수','건'],['daily','아르바이트·일당','일당','근무 일수','일'],['commerce','판매·커머스','판매 단가','판매 수량','개'],['subscription','구독·멤버십','월 구독료','유료 구독자','명'],['affiliate','광고·제휴','건당 수익','성과 건수','건'],['invest','투자·자산','실현 수익','횟수','회'],['other','기타','단가','수량','건']];
 const TABS=[['홈',Home],['전략',Target],['일정',CalendarDays],['매출',Wallet],['분석',ChartNoAxesCombined],['히스토리',History]];
@@ -22,7 +23,7 @@ function App(){
   const {data:row,error:readError}=await client.from('income_flow_data').select('payload').eq('user_id',owner).maybeSingle();
   if(readError)throw readError;
   if(accountRef.current!==owner||key!==requestId.current||saveBlocked.current)return;
-  if(JSON.stringify(row?.payload??null)!==JSON.stringify(serverBaseline.current)){
+  if(!sameSnapshot(row?.payload??null,serverBaseline.current)){
    saveBlocked.current=true;
    try{localStorage.setItem('income-flow-conflict-backup-'+owner,JSON.stringify(data))}catch{}
    setSaveStatus('다른 기기 수정 감지 · 저장 중단 (기기 백업 유지)');
