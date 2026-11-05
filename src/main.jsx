@@ -15,10 +15,24 @@ function Modal({title,onClose,children}){useEffect(()=>{const fn=e=>{if(e.key===
 function App(){
  const [user,setUser]=useState(null),[authReady,setAuthReady]=useState(false),[authMode,setAuthMode]=useState('login'),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[authBusy,setAuthBusy]=useState(false);
  const [data,setData]=useState(initial),[loaded,setLoaded]=useState(false),[saveStatus,setSaveStatus]=useState(''),[tab,setTab]=useState('홈'),[dialog,setDialog]=useState(''),[draft,setDraft]=useState({}),[selectedStrategy,setSelectedStrategy]=useState(''),[analysisMode,setAnalysisMode]=useState('비교'),[simMode,setSimMode]=useState('역산'),[calendarMonth,setCalendarMonth]=useState(today().slice(0,7)),[calendarDay,setCalendarDay]=useState(today()),[calendarStrategy,setCalendarStrategy]=useState('all'),[eventFilters,setEventFilters]=useState(['plan','done','sale','receipt']);
- const loadedRef=useRef(false),requestId=useRef(0),accountRef=useRef(null);
+ const loadedRef=useRef(false),requestId=useRef(0),accountRef=useRef(null),serverBaseline=useRef(null),saveBlocked=useRef(false);
  useEffect(()=>{if(!client){setAuthReady(true);return;}client.auth.getSession().then(({data:{session},error})=>{if(error)setSaveStatus(error.message);setUser(session?.user||null);setAuthReady(true);}).catch(e=>{setSaveStatus(e.message);setAuthReady(true)});const {data:{subscription}}=client.auth.onAuthStateChange((_,session)=>setUser(session?.user||null));return()=>subscription.unsubscribe()},[]);
- useEffect(()=>{loadedRef.current=false;setLoaded(false);const localId=user?.id||null;accountRef.current=localId;requestId.current++;setData(initial());if(!client||!localId)return;let alive=true;(async()=>{setSaveStatus('클라우드 연결 중…');const {data:row,error}=await client.from('income_flow_data').select('payload').eq('user_id',localId).maybeSingle();if(!alive)return;if(error){setSaveStatus('불러오기 실패: '+error.message);return;}const payload=row?.payload;setData(payload&&typeof payload==='object'?{...initial(),...payload}:initial());loadedRef.current=true;setLoaded(true);setSaveStatus('동기화됨');})();return()=>{alive=false;}},[user?.id]);
- useEffect(()=>{if(!client||!user||!loadedRef.current||!loaded)return;const key=++requestId.current,owner=user.id;setSaveStatus('저장 중…');const timer=setTimeout(async()=>{const {error}=await client.from('income_flow_data').upsert({user_id:owner,payload:data,updated_at:stamp()},{onConflict:'user_id'});if(key===requestId.current&&accountRef.current===owner)setSaveStatus(error?'저장 실패: '+error.message:'저장됨 ✓')},700);return()=>clearTimeout(timer)},[data,loaded,user?.id]);
+ useEffect(()=>{loadedRef.current=false;setLoaded(false);const localId=user?.id||null;accountRef.current=localId;serverBaseline.current=null;saveBlocked.current=false;requestId.current++;setData(initial());if(!client||!localId)return;let alive=true;(async()=>{setSaveStatus('클라우드 연결 중…');const {data:row,error}=await client.from('income_flow_data').select('payload').eq('user_id',localId).maybeSingle();if(!alive)return;if(error){setSaveStatus('불러오기 실패: '+error.message);return;}const payload=row?.payload;serverBaseline.current=payload??null;setData(payload&&typeof payload==='object'?{...initial(),...payload}:initial());loadedRef.current=true;setLoaded(true);setSaveStatus('동기화됨');})();return()=>{alive=false;}},[user?.id]);
+ useEffect(()=>{if(!client||!user||!loadedRef.current||!loaded||saveBlocked.current)return;const key=++requestId.current,owner=user.id;setSaveStatus('저장 중…');const timer=setTimeout(async()=>{try{
+  const {data:row,error:readError}=await client.from('income_flow_data').select('payload').eq('user_id',owner).maybeSingle();
+  if(readError)throw readError;
+  if(accountRef.current!==owner||key!==requestId.current||saveBlocked.current)return;
+  if(JSON.stringify(row?.payload??null)!==JSON.stringify(serverBaseline.current)){
+   saveBlocked.current=true;
+   try{localStorage.setItem('income-flow-conflict-backup-'+owner,JSON.stringify(data))}catch{}
+   setSaveStatus('다른 기기 수정 감지 · 저장 중단 (기기 백업 유지)');
+   return;
+  }
+  const {error}=await client.from('income_flow_data').upsert({user_id:owner,payload:data,updated_at:stamp()},{onConflict:'user_id'});
+  if(error)throw error;
+  serverBaseline.current=data;
+  if(key===requestId.current&&accountRef.current===owner)setSaveStatus('저장됨 ✓');
+ }catch(e){if(key===requestId.current&&accountRef.current===owner)setSaveStatus('저장 실패 · 기기 백업 유지: '+e.message)}},700);return()=>clearTimeout(timer)},[data,loaded,user?.id]);
  const change=fn=>setData(d=>fn(structuredClone(d)));const strategies=data.strategies||[],sales=data.sales||[],receipts=data.receipts||[];
  const saleTotal=sales.reduce((a,x)=>a+num(x.amount),0),receiptTotal=receipts.reduce((a,x)=>a+num(x.amount),0),feesTotal=receipts.reduce((a,x)=>a+num(x.fee),0);
  const outstanding=Math.max(0,saleTotal-receiptTotal-feesTotal);const goal=num(data.goal);const steps=strategies.flatMap(s=>s.steps||[]);const completedSteps=steps.filter(x=>x.done).length;
